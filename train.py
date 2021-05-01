@@ -61,8 +61,6 @@ AUTO     = tf.data.experimental.AUTOTUNE
 REPLICAS = strategy.num_replicas_in_sync
 print(f'REPLICAS: {REPLICAS}')
 
-# 'gs://kds-7519c027b63db7c377559316c0d930960fd61347d4086351a37c897f'
-
 GCS_PATH='gs://project-285401/512_tfrec'
 IDX=[2,3,4,5]
 files_train = list(tf.io.gfile.glob(GCS_PATH + '/train*.tfrec'))
@@ -185,12 +183,10 @@ def dropout(image, DIM=256, PROBABILITY = 0.75, CT = 8, SZ = 0.2):
 def read_labeled_tfrecord(example):
     tfrec_format = {
         'image'                        : tf.io.FixedLenFeature([], tf.string),
-        'image_name'                   : tf.io.FixedLenFeature([], tf.string),
         'target'                       : tf.io.FixedLenFeature([], tf.int64)
     }           
     example = tf.io.parse_single_example(example, tfrec_format)
     return example['image'], example['target']
-
 
 def read_unlabeled_tfrecord(example, return_image_name=True):
     tfrec_format = {
@@ -199,7 +195,6 @@ def read_unlabeled_tfrecord(example, return_image_name=True):
     }
     example = tf.io.parse_single_example(example, tfrec_format)
     return example['image'], example['image_name'] if return_image_name else 0
-
  
 def prepare_image(img, augment=True, dim=256, droprate=0, dropct=0, dropsize=0):    
     img = tf.image.decode_jpeg(img, channels=3)
@@ -210,13 +205,20 @@ def prepare_image(img, augment=True, dim=256, droprate=0, dropct=0, dropsize=0):
         if (droprate!=0)&(dropct!=0)&(dropsize!=0): 
             img = dropout(img, DIM=dim, PROBABILITY=droprate, CT=dropct, SZ=dropsize)
         img = tf.image.random_flip_left_right(img)
-        img = tf.image.random_hue(img, 0.01)
-        img = tf.image.random_saturation(img, 0.7, 1.3)
-        img = tf.image.random_contrast(img, 0.8, 1.2)
-        img = tf.image.random_brightness(img, 0.1)
+        img = tf.image.random_flip_up_down(img)
+        img = tf.image.random_hue(img, 0.001)
+        img = tf.image.random_saturation(img, 0.74, 1.021)
+        img = tf.image.random_contrast(img, 0.728, 1.02)
+        img = tf.image.random_brightness(img, 0.09)
                       
     img = tf.reshape(img, [dim,dim, 3])
             
+    return img
+
+def no_aug_imgs(img,dim=256):
+    img = tf.image.decode_jpeg(img,channels=3)
+    img = tf.cast(img, tf.float32) / 255.0
+    img = tf.image.resize(img,[dim,dim])
     return img
 
 def count_data_items(filenames):
@@ -245,12 +247,14 @@ def get_dataset(files, augment = False, shuffle = False, repeat = False,
     else:
         ds = ds.map(lambda example: read_unlabeled_tfrecord(example, return_image_names), 
                     num_parallel_calls=AUTO)      
-    
-    ds = ds.map(lambda img, imgname_or_label: (
+    if augment:
+        ds = ds.map(lambda img, imgname_or_label: (
                 prepare_image(img, augment=augment, dim=dim, 
                               droprate=droprate, dropct=dropct, dropsize=dropsize), 
                 imgname_or_label), 
                 num_parallel_calls=AUTO)
+    else:
+        ds = ds.map(lambda image,label:(no_aug_imgs(img,dim=dim),label),num_parallel_calls=AUTO)
     
     ds = ds.batch(batch_size * REPLICAS)
     ds = ds.prefetch(AUTO)
@@ -296,24 +300,24 @@ def build_model(dim=128):
     base = efn.EfficientNetB7(input_shape=(dim,dim,3),weights='imagenet',pooling='avg',include_top=False)
     x = base(inp)
     # x = tf.keras.layers.GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(128,activation='gelu')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
-    x = tf.keras.layers.Dense(182,activation='gelu')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
+    # x = tf.keras.layers.Dense(128,activation='gelu')(x)
+    # x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
+    # x = tf.keras.layers.Dense(182,activation='gelu')(x)
+    # x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Dense(1,activation='sigmoid')(x)
     model = tf.keras.Model(inputs=inp,outputs=x)
-    opt = tf.keras.optimizers.Adam(learning_rate=0.00001)
-    loss = [binary_focal_loss(gamma=2,alpha=0.12)]
+    opt = 'adam'
+    loss = tf.keras.losses.BinaryCrossentropy(label_smoothing=0.05)
     model.compile(optimizer=opt,loss=loss,metrics=['AUC'])
     return model
 
 """**Learning rate scheduler**"""
 
 def get_lr_callback(batch_size=8):
-    lr_start   = 0.0005
-    lr_max     = 0.000125 * REPLICAS * batch_size
-    lr_min     = 0.00001
+    lr_start   = 0.000005
+    lr_max     = 0.00000125 * REPLICAS * batch_size
+    lr_min     = 0.000001
     lr_ramp_ep = 5
     lr_sus_ep  = 0
     lr_decay   = 0.8
@@ -363,7 +367,7 @@ history = model.fit(
         get_dataset(files_train, augment=True, shuffle=True, repeat=True,
                 dim=IMG_SIZES[0], batch_size = BATCH_SIZES[0],
                 droprate=DROP_FREQ[1], dropct=DROP_CT[1], dropsize=DROP_SIZE[1]), 
-        epochs=EPOCHS[0], callbacks = [es,lr_schedule], 
+        epochs=EPOCHS[0], callbacks = [es,get_lr_callback(BATCH_SIZES[0])], 
         steps_per_epoch=count_data_items(files_train)/BATCH_SIZES[0]//REPLICAS,
         validation_data=get_dataset(files_valid,augment=False,shuffle=False,
                 repeat=False,dim=IMG_SIZES[0]),
