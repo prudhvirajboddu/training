@@ -21,7 +21,7 @@ DROP_CT = [0,8,8] # may slow training if CT>16
 DROP_SIZE = [0,0.2,0.2] # between 0 and 1
 
 BATCH_SIZES = [32]
-EPOCHS = [10]
+EPOCHS = [2]
 
 """**TPU configuration** 
 
@@ -254,7 +254,7 @@ def get_dataset(files, augment = False, shuffle = False, repeat = False,
                 imgname_or_label), 
                 num_parallel_calls=AUTO)
     else:
-        ds = ds.map(lambda image,label:(no_aug_imgs(img,dim=dim),label),num_parallel_calls=AUTO)
+        ds = ds.map(lambda image,label:(no_aug_imgs(image,dim=dim),label),num_parallel_calls=AUTO)
     
     ds = ds.batch(batch_size * REPLICAS)
     ds = ds.prefetch(AUTO)
