@@ -38,7 +38,7 @@ CFG = dict(
     LR_RAMPUP_EPOCHS  =   5,
     LR_SUSTAIN_EPOCHS =   0,
     LR_EXP_DECAY      =   0.8,
-    epochs            =  2,
+    epochs            =  25,
     
     rot               = 180.0,
     shr               =   2.0,
@@ -289,6 +289,8 @@ def get_lr_callback(cfg):
     lr_callback = tf.keras.callbacks.LearningRateScheduler(lrfn, verbose=False)
     return lr_callback
 
+es=tf.keras.callbacks.EarlyStopping(monitor='auc',patience=3,
+                                    mode='max',restore_best_weights=True)
 def get_model(cfg):
     model_input = tf.keras.Input(shape=(cfg['net_size'], cfg['net_size'], 3), name='imgIn')
 
@@ -338,7 +340,7 @@ for i,(tr_idx,va_idx) in enumerate(folds.split(files_train)):
                          verbose          = 1,
                          steps_per_epoch  = steps_train, 
                          epochs           = CFG['epochs'],
-                         callbacks        = [get_lr_callback(CFG)])
+                         callbacks        = [get_lr_callback(CFG),es])
 
     model.save('model_'+str(i)+'.h5')
     
