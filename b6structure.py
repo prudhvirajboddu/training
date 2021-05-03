@@ -289,8 +289,8 @@ def get_lr_callback(cfg):
     lr_callback = tf.keras.callbacks.LearningRateScheduler(lrfn, verbose=1)
     return lr_callback
 
-es=tf.keras.callbacks.EarlyStopping(monitor='val_auc',patience=3,
-                                    mode='max',restore_best_weights=True,verbose=1)
+es=tf.keras.callbacks.EarlyStopping(monitor='val_auc',patience=4,
+                                    mode='max',restore_best_weights=False,verbose=1)
 
 def get_model(cfg):
     model_input = tf.keras.Input(shape=(cfg['net_size'], cfg['net_size'], 3), name='imgIn')
@@ -301,6 +301,7 @@ def get_model(cfg):
     x = constructor(include_top=False, weights='imagenet', 
                     input_shape=(cfg['net_size'], cfg['net_size'], 3), 
                     pooling='avg')(dummy)
+    x = tf.keras.layers.Dropout(0.3,seed=1024)(x)
     x = tf.keras.layers.Dense(1, activation='sigmoid')(x)
     outputs = [x]
         
@@ -328,6 +329,7 @@ folds = KFold(n_splits=nsplits, shuffle = True, random_state = rand)
 # pred_tr = pd.DataFrame()
 cnt = 0
 for i,(tr_idx,va_idx) in enumerate(folds.split(files_train)):
+    print("#"*20+"\n split"+str(i+1))
     CFG['batch_size'] = bs
     files_train_tr = files_train[tr_idx]
     files_train_va = files_train[va_idx]
