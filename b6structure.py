@@ -16,13 +16,13 @@ import PIL
 
 # from tqdm import tqdm
 
-GCS_PATH    = "gs://project-285401/512_tfrec"
+GCS_PATH    = "gs://project-285401/70k-512rec"
 files_train = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/train*.tfrec')))
 files_test  = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/test*.tfrec')))
 
 DEVICE = "TPU"
 
-bs = 24
+bs = 32
 
 CFG = dict(
     net_count         =   7,
@@ -30,9 +30,9 @@ CFG = dict(
     
     read_size         = 512, 
     crop_size         = 384, 
-    net_size          = 256, 
+    net_size          = 224, 
     
-    LR_START          =   0.000005,
+    LR_START          =   0.00005,
     LR_MAX            =   0.000020,
     LR_MIN            =   0.000001,
     LR_RAMPUP_EPOCHS  =   5,
@@ -47,7 +47,7 @@ CFG = dict(
     hshift            =   8.0,
     wshift            =   8.0,
 
-    optimizer         = 'adam',
+    optimizer         = 'sgd',
     label_smooth_fac  =   0.05,
     
     tta_steps         =  25    
@@ -355,7 +355,7 @@ for i,(tr_idx,va_idx) in enumerate(folds.split(files_train)):
                          validation_steps = steps_valid,
                          callbacks        = [get_lr_callback(CFG),es])
 
-    model.save('model_'+str(i+1)+'.h5')
+    model.save('added_model_'+str(i+1)+'.h5')
     
     # make train prediction
 #     CFG['batch_size'] = 256
