@@ -2,9 +2,9 @@ import os, random, re, math, time
 random.seed(a=42)
 
 import numpy as np
-import pandas as pd
+# import pandas as pd
 from sklearn.model_selection import KFold
-from sklearn.metrics import roc_auc_score
+# from sklearn.metrics import roc_auc_score
 
 import tensorflow as tf
 import tensorflow.keras.backend as K
@@ -14,7 +14,7 @@ import PIL
 
 # from kaggle_datasets import KaggleDatasets
 
-from tqdm import tqdm
+# from tqdm import tqdm
 
 GCS_PATH    = "gs://project-285401/512_tfrec"
 files_train = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/train*.tfrec')))
@@ -38,7 +38,7 @@ CFG = dict(
     LR_RAMPUP_EPOCHS  =   5,
     LR_SUSTAIN_EPOCHS =   0,
     LR_EXP_DECAY      =   0.8,
-    epochs            =  25,
+    epochs            =  20,
     
     rot               = 180.0,
     shr               =   2.0,
@@ -286,11 +286,12 @@ def get_lr_callback(cfg):
             
         return lr
 
-    lr_callback = tf.keras.callbacks.LearningRateScheduler(lrfn, verbose=False)
+    lr_callback = tf.keras.callbacks.LearningRateScheduler(lrfn, verbose=1)
     return lr_callback
 
-es=tf.keras.callbacks.EarlyStopping(monitor='auc',patience=3,
-                                    mode='max',restore_best_weights=True)
+es=tf.keras.callbacks.EarlyStopping(monitor='val_auc',patience=3,
+                                    mode='max',restore_best_weights=True,verbose=1)
+
 def get_model(cfg):
     model_input = tf.keras.Input(shape=(cfg['net_size'], cfg['net_size'], 3), name='imgIn')
 
@@ -321,7 +322,7 @@ def compile_new_model(cfg):
     return model
 
 nsplits = 5
-rand = 1023
+rand = 1024
 folds = KFold(n_splits=nsplits, shuffle = True, random_state = rand)
 
 # pred_tr = pd.DataFrame()
@@ -333,16 +334,26 @@ for i,(tr_idx,va_idx) in enumerate(folds.split(files_train)):
     ds_train     = get_dataset(files_train_tr, CFG, augment=True, shuffle=True, repeat=True)
     # ds_train     = ds_train.map(lambda img, label: (img, tuple([label] * CFG['net_count'])))
     ds_train     = ds_train.map(lambda img, label: (img, tuple([label])))
+    
+    ds_valid = get_dataset(files_train_va,CFG,augment=False,shuffle=False,repeat=False)
+
+    ds_valid = ds_valid.map(lambda img,label:(img, tuple([label])))
+
     steps_train  = count_data_items(files_train_tr) / (CFG['batch_size'] * REPLICAS)
 
+    steps_valid = count_data_items(files_train_va) / (CFG['batch_size']* REPLICAS)
+
     model        = compile_new_model(CFG)
+
     history      = model.fit(ds_train, 
                          verbose          = 1,
                          steps_per_epoch  = steps_train, 
                          epochs           = CFG['epochs'],
+                         validation_data = ds_valid,
+                         validation_steps = steps_valid,
                          callbacks        = [get_lr_callback(CFG),es])
 
-    model.save('model_'+str(i)+'.h5')
+    model.save('model_'+str(i+1)+'.h5')
     
     # make train prediction
 #     CFG['batch_size'] = 256
