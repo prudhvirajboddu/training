@@ -1,4 +1,4 @@
-import os, random, re, math, time
+import random, re, math
 random.seed(a=42)
 
 import numpy as np
@@ -22,7 +22,7 @@ files_test  = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/test*.tfrec')))
 
 DEVICE = "TPU"
 
-bs = 32
+bs = 64
 
 CFG = dict(
     net_count         =   7,
@@ -47,7 +47,7 @@ CFG = dict(
     hshift            =   8.0,
     wshift            =   8.0,
 
-    optimizer         = 'sgd',
+    optimizer         = 'adam',
     label_smooth_fac  =   0.05,
     
     tta_steps         =  25    
