@@ -161,12 +161,12 @@ def transform(image, cfg):
 def read_labeled_tfrecord(example):
     tfrec_format = {
         'image'                        : tf.io.FixedLenFeature([], tf.string),
-        'image_name'                   : tf.io.FixedLenFeature([], tf.string),
-        'patient_id'                   : tf.io.FixedLenFeature([], tf.int64),
-        'sex'                          : tf.io.FixedLenFeature([], tf.int64),
-        'age_approx'                   : tf.io.FixedLenFeature([], tf.int64),
-        'anatom_site_general_challenge': tf.io.FixedLenFeature([], tf.int64),
-        'diagnosis'                    : tf.io.FixedLenFeature([], tf.int64),
+        # 'image_name'                   : tf.io.FixedLenFeature([], tf.string),
+        # 'patient_id'                   : tf.io.FixedLenFeature([], tf.int64),
+        # 'sex'                          : tf.io.FixedLenFeature([], tf.int64),
+        # 'age_approx'                   : tf.io.FixedLenFeature([], tf.int64),
+        # 'anatom_site_general_challenge': tf.io.FixedLenFeature([], tf.int64),
+        # 'diagnosis'                    : tf.io.FixedLenFeature([], tf.int64),
         'target'                       : tf.io.FixedLenFeature([], tf.int64)
     }           
     example = tf.io.parse_single_example(example, tfrec_format)
