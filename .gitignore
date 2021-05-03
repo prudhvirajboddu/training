@@ -1,4 +1,5 @@
 #folders
 .vscode
+models
 #files
 *.h5
