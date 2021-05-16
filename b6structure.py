@@ -1,36 +1,29 @@
 import random, re, math
 random.seed(a=42)
-
 import numpy as np
-# import pandas as pd
 from sklearn.model_selection import KFold
-# from sklearn.metrics import roc_auc_score
 
 import tensorflow as tf
 import tensorflow.keras.backend as K
 import efficientnet.tfkeras as efn
 
-import PIL
 
-# from kaggle_datasets import KaggleDatasets
+GCS_PATH    = "gs://project-285401/70k-512rec" #path to training records
 
-# from tqdm import tqdm
-
-GCS_PATH    = "gs://project-285401/70k-512rec"
 files_train = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/train*.tfrec')))
 files_test  = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/test*.tfrec')))
 
 DEVICE = "TPU"
 
-bs = 64
+bs = 64 #Batch Size
 
 CFG = dict(
-    net_count         =   7,
+    #hyper parameters 
     batch_size        =  bs,
     
     read_size         = 512, 
-    crop_size         = 384, 
-    net_size          = 224, 
+    crop_size         = random.randint(501,512), #Random crop of the image
+    net_size          = 500, 
     
     LR_START          =   0.00005,
     LR_MAX            =   0.000020,
@@ -38,7 +31,7 @@ CFG = dict(
     LR_RAMPUP_EPOCHS  =   5,
     LR_SUSTAIN_EPOCHS =   0,
     LR_EXP_DECAY      =   0.8,
-    epochs            =  20,
+    epochs            =   30,
     
     rot               = 180.0,
     shr               =   2.0,
@@ -56,7 +49,7 @@ CFG = dict(
 if DEVICE == "TPU":
     print("connecting to TPU...")
     try:
-        tpu = tf.distribute.cluster_resolver.TPUClusterResolver(tpu='tpu')
+        tpu = tf.distribute.cluster_resolver.TPUClusterResolver(tpu='tpu') #tpu name is 'tpu'
         print('Running on TPU ', tpu.master())
     except ValueError:
         print("Could not connect to TPU")
@@ -87,6 +80,7 @@ REPLICAS = strategy.num_replicas_in_sync
 print(f'REPLICAS: {REPLICAS}')
 
 def get_mat(rotation, shear, height_zoom, width_zoom, height_shift, width_shift):
+    """Data Augmentation method"""
     # returns 3x3 transformmatrix which transforms indicies
         
     # CONVERT DEGREES TO RADIANS
@@ -237,34 +231,21 @@ def get_dataset(files, cfg, augment = False, shuffle = False, repeat = False,
     ds = ds.prefetch(AUTO)
     return ds
 
-def show_dataset(thumb_size, cols, rows, ds):
-    mosaic = PIL.Image.new(mode='RGB', size=(thumb_size*cols + (cols-1), 
-                                             thumb_size*rows + (rows-1)))
+# def show_dataset(thumb_size, cols, rows, ds):
+#     mosaic = PIL.Image.new(mode='RGB', size=(thumb_size*cols + (cols-1), 
+#                                              thumb_size*rows + (rows-1)))
    
-    for idx, data in enumerate(iter(ds)):
-        img, target_or_imgid = data
-        ix  = idx % cols
-        iy  = idx // cols
-        img = np.clip(img.numpy() * 255, 0, 255).astype(np.uint8)
-        img = PIL.Image.fromarray(img)
-        img = img.resize((thumb_size, thumb_size), resample=PIL.Image.BILINEAR)
-        mosaic.paste(img, (ix*thumb_size + ix, 
-                           iy*thumb_size + iy))
+#     for idx, data in enumerate(iter(ds)):
+#         img, target_or_imgid = data
+#         ix  = idx % cols
+#         iy  = idx // cols
+#         img = np.clip(img.numpy() * 255, 0, 255).astype(np.uint8)
+#         img = PIL.Image.fromarray(img)
+#         img = img.resize((thumb_size, thumb_size), resample=PIL.Image.BILINEAR)
+#         mosaic.paste(img, (ix*thumb_size + ix, 
+#                            iy*thumb_size + iy))
 
-    display(mosaic)
-
-# ds = get_dataset(files_train, CFG).unbatch().take(12*5)   
-# # show_dataset(64, 12, 5, ds)
-
-# ds = tf.data.TFRecordDataset(files_train, num_parallel_reads=AUTO)
-# ds = ds.take(1).cache().repeat()
-# ds = ds.map(read_labeled_tfrecord, num_parallel_calls=AUTO)
-# ds = ds.map(lambda img, target: (prepare_image(img, cfg=CFG, augment=True), target), 
-#             num_parallel_calls=AUTO)
-# ds = ds.take(12*5)
-# ds = ds.prefetch(AUTO)
-
-# show_dataset(64, 12, 5, ds)
+#     display(mosaic)
 
 def get_lr_callback(cfg):
     lr_start   = cfg['LR_START']
@@ -322,7 +303,7 @@ def compile_new_model(cfg):
         
     return model
 
-nsplits = 5
+nsplits = 5 #no of splits 
 rand = 1024
 folds = KFold(n_splits=nsplits, shuffle = True, random_state = rand)
 
@@ -334,7 +315,7 @@ for i,(tr_idx,va_idx) in enumerate(folds.split(files_train)):
     files_train_tr = files_train[tr_idx]
     files_train_va = files_train[va_idx]
     ds_train     = get_dataset(files_train_tr, CFG, augment=True, shuffle=True, repeat=True)
-    # ds_train     = ds_train.map(lambda img, label: (img, tuple([label] * CFG['net_count'])))
+
     ds_train     = ds_train.map(lambda img, label: (img, tuple([label])))
     
     ds_valid = get_dataset(files_train_va,CFG,augment=False,shuffle=False,repeat=False)
@@ -355,69 +336,4 @@ for i,(tr_idx,va_idx) in enumerate(folds.split(files_train)):
                          validation_steps = steps_valid,
                          callbacks        = [get_lr_callback(CFG),es])
 
-    model.save('added_model_'+str(i+1)+'.h5')
-    
-    # make train prediction
-#     CFG['batch_size'] = 256
-
-#     cnt_train   = count_data_items(files_train_va)
-#     steps      = cnt_train / (CFG['batch_size'] * REPLICAS) * CFG['tta_steps']
-#     ds_trainAug = get_dataset(files_train_va, CFG, augment=True, repeat=True, 
-#                              labeled=False, return_image_names=False)
-
-#     probs = model.predict(ds_trainAug, verbose=1, steps=steps)
-#     probs = probs[:cnt_train * CFG['tta_steps'],:]
-#     probs = np.stack(np.split(probs, CFG['tta_steps'], axis=0), axis=0)
-    
-#     ds = get_dataset(files_train_va, CFG, augment=False, repeat=False, 
-#                  labeled=False, return_image_names=True)
-#     image_names = np.array([img_name.numpy().decode("utf-8") 
-#                         for img, img_name in iter(ds.unbatch())])
-#     pred = pd.DataFrame(dict(
-#     image_name = image_names,
-#     target     = np.mean(probs[:,:,0], axis=0)))
-    
-#     pred_tr = pd.concat([pred_tr, pred], axis=0)
-    
-#     # make submission data
-#     cnt_test   = count_data_items(files_test)
-#     steps      = cnt_test / (CFG['batch_size'] * REPLICAS) * CFG['tta_steps']
-#     ds_testAug = get_dataset(files_test, CFG, augment=True, repeat=True, 
-#                              labeled=False, return_image_names=False)
-
-#     probs = model.predict(ds_testAug, verbose=1, steps=steps)
-    
-#     probs = probs[:cnt_test * CFG['tta_steps'],:]
-#     probs = np.stack(np.split(probs, CFG['tta_steps'], axis=0), axis=0)
-    
-#     if cnt == 0:
-#         probs_sub = probs/nsplits
-#         cnt = 1
-#     else:
-#         probs_sub += probs/nsplits
-
-# new
-
-# pred_tr = pred_tr.sort_values('image_name') 
-# pred_tr.to_csv('pred_tr.csv', index=False)
-
-# pred_tr.head(10)
-
-# pred_tr = pred_tr.merge(df_train, on = ["image_name"], how = "left")
-# print(roc_auc_score(pred_tr["target_y"], pred_tr["target_x"]))
-
-# ds = get_dataset(files_test, CFG, augment=False, repeat=False, 
-#                  labeled=False, return_image_names=True)
-
-# image_names = np.array([img_name.numpy().decode("utf-8") 
-#                         for img, img_name in iter(ds.unbatch())])
-
-# submission = pd.DataFrame(dict(
-#     image_name = image_names,
-#     target     = np.mean(probs_sub[:,:,0], axis=0)))
-# #     target = np.mean(probs, axis = 1)))
-
-# submission = submission.sort_values('image_name') 
-# submission.to_csv('submission.csv', index=False)
-
-# submission.head(10)
+    model.save('new_train_models'+str(i+1)+'.h5')
