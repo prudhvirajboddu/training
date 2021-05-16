@@ -3,30 +3,26 @@ import pandas as pd, numpy as np, gc
 import tensorflow as tf, re, math
 import tensorflow.keras.backend as K
 import efficientnet.tfkeras as efn
-# from sklearn.model_selection import KFold
-from sklearn.metrics import roc_auc_score
-# import matplotlib.pyplot as plt
+from augment import *
 
 """**Model parameters**"""
 
-DEVICE='TPU'
+DEVICE='TPU' #GPU
 
 SEED=np.random.randint(1,100)
 
-IMG_SIZES=[224,224]
+IMG_SIZES=[500,500] #Tried 512,224,384,256
 
-# COARSE DROPOUT
+# COARSE DROPOUT for Data Augmentation
 DROP_FREQ = [0,0.75,0.75] # between 0 and 1
 DROP_CT = [0,8,8] # may slow training if CT>16
 DROP_SIZE = [0,0.2,0.2] # between 0 and 1
 
-BATCH_SIZES = [32]
-EPOCHS = [10]
+BATCH_SIZES = [32] #Hyperparameter
+EPOCHS = [50] #Tried 64,100 random epochs
 
-"""**TPU configuration** 
-
-
-"""
+"""**TPU configuration**"""
+#Model Trained on Both TPU and GPU
 
 if DEVICE == "TPU":
     print("connecting to TPU...")
@@ -61,9 +57,8 @@ AUTO     = tf.data.experimental.AUTOTUNE
 REPLICAS = strategy.num_replicas_in_sync
 print(f'REPLICAS: {REPLICAS}')
 
-# 'gs://kds-7519c027b63db7c377559316c0d930960fd61347d4086351a37c897f'
 
-GCS_PATH='gs://project-285401/512_tfrec'
+GCS_PATH='gs://project-285401/512_tfrec' #TFrecords for Training
 IDX=[2,3,4,5]
 files_train = list(tf.io.gfile.glob(GCS_PATH + '/train*.tfrec'))
 files_test  = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/test*.tfrec')))
@@ -82,105 +77,6 @@ ROT_ = 180.0; SHR_ = 2.0
 HZOOM_ = 8.0; WZOOM_ = 8.0
 HSHIFT_ = 8.0; WSHIFT_ = 8.0
 
-def get_mat(rotation, shear, height_zoom, width_zoom, height_shift, width_shift):
-    # returns 3x3 transformmatrix which transforms indicies
-        
-    # CONVERT DEGREES TO RADIANS
-    rotation = math.pi * rotation / 180.
-    shear    = math.pi * shear    / 180.
-
-    def get_3x3_mat(lst):
-        return tf.reshape(tf.concat([lst],axis=0), [3,3])
-    
-    # ROTATION MATRIX
-    c1   = tf.math.cos(rotation)
-    s1   = tf.math.sin(rotation)
-    one  = tf.constant([1],dtype='float32')
-    zero = tf.constant([0],dtype='float32')
-    
-    rotation_matrix = get_3x3_mat([c1,   s1,   zero, 
-                                   -s1,  c1,   zero, 
-                                   zero, zero, one])    
-    # SHEAR MATRIX
-    c2 = tf.math.cos(shear)
-    s2 = tf.math.sin(shear)    
-    
-    shear_matrix = get_3x3_mat([one,  s2,   zero, 
-                                zero, c2,   zero, 
-                                zero, zero, one])        
-    # ZOOM MATRIX
-    zoom_matrix = get_3x3_mat([one/height_zoom, zero,           zero, 
-                               zero,            one/width_zoom, zero, 
-                               zero,            zero,           one])    
-    # SHIFT MATRIX
-    shift_matrix = get_3x3_mat([one,  zero, height_shift, 
-                                zero, one,  width_shift, 
-                                zero, zero, one])
-    
-    return K.dot(K.dot(rotation_matrix, shear_matrix), 
-                 K.dot(zoom_matrix,     shift_matrix))
-
-
-def transform(image, DIM=256):    
-    # input image - is one image of size [dim,dim,3] not a batch of [b,dim,dim,3]
-    # output - image randomly rotated, sheared, zoomed, and shifted
-    XDIM = DIM%2 #fix for size 331
-    
-    rot = ROT_ * tf.random.normal([1], dtype='float32')
-    shr = SHR_ * tf.random.normal([1], dtype='float32') 
-    h_zoom = 1.0 + tf.random.normal([1], dtype='float32') / HZOOM_
-    w_zoom = 1.0 + tf.random.normal([1], dtype='float32') / WZOOM_
-    h_shift = HSHIFT_ * tf.random.normal([1], dtype='float32') 
-    w_shift = WSHIFT_ * tf.random.normal([1], dtype='float32') 
-
-    # GET TRANSFORMATION MATRIX
-    m = get_mat(rot,shr,h_zoom,w_zoom,h_shift,w_shift) 
-
-    # LIST DESTINATION PIXEL INDICES
-    x   = tf.repeat(tf.range(DIM//2, -DIM//2,-1), DIM)
-    y   = tf.tile(tf.range(-DIM//2, DIM//2), [DIM])
-    z   = tf.ones([DIM*DIM], dtype='int32')
-    idx = tf.stack( [x,y,z] )
-    
-    # ROTATE DESTINATION PIXELS ONTO ORIGIN PIXELS
-    idx2 = K.dot(m, tf.cast(idx, dtype='float32'))
-    idx2 = K.cast(idx2, dtype='int32')
-    idx2 = K.clip(idx2, -DIM//2+XDIM+1, DIM//2)
-    
-    # FIND ORIGIN PIXEL VALUES           
-    idx3 = tf.stack([DIM//2-idx2[0,], DIM//2-1+idx2[1,]])
-    d    = tf.gather_nd(image, tf.transpose(idx3))
-        
-    return tf.reshape(d,[DIM, DIM,3])
-
-def dropout(image, DIM=256, PROBABILITY = 0.75, CT = 8, SZ = 0.2):
-    # input image - is one image of size [dim,dim,3] not a batch of [b,dim,dim,3]
-    # output - image with CT squares of side size SZ*DIM removed
-    
-    # DO DROPOUT WITH PROBABILITY DEFINED ABOVE
-    P = tf.cast( tf.random.uniform([],0,1)<PROBABILITY, tf.int32)
-    if (P==0)|(CT==0)|(SZ==0): return image
-    
-    for k in range(CT):
-        # CHOOSE RANDOM LOCATION
-        x = tf.cast( tf.random.uniform([],0,DIM),tf.int32)
-        y = tf.cast( tf.random.uniform([],0,DIM),tf.int32)
-        # COMPUTE SQUARE 
-        WIDTH = tf.cast( SZ*DIM,tf.int32) * P
-        ya = tf.math.maximum(0,y-WIDTH//2)
-        yb = tf.math.minimum(DIM,y+WIDTH//2)
-        xa = tf.math.maximum(0,x-WIDTH//2)
-        xb = tf.math.minimum(DIM,x+WIDTH//2)
-        # DROPOUT IMAGE
-        one = image[ya:yb,0:xa,:]
-        two = tf.zeros([yb-ya,xb-xa,3]) 
-        three = image[ya:yb,xb:DIM,:]
-        middle = tf.concat([one,two,three],axis=1)
-        image = tf.concat([image[0:ya,:,:],middle,image[yb:DIM,:,:]],axis=0)
-            
-    # RESHAPE HACK SO TPU COMPILER KNOWS SHAPE OF OUTPUT TENSOR 
-    image = tf.reshape(image,[DIM,DIM,3])
-    return image
 
 def read_labeled_tfrecord(example):
     tfrec_format = {
@@ -256,13 +152,6 @@ def get_dataset(files, augment = False, shuffle = False, repeat = False,
     ds = ds.prefetch(AUTO)
     return ds
 
-# for i,j in ds.take(1):
-#     print(i.shape)
-#     print(j.shape)
-
-# EFNS = [efn.EfficientNetB0, efn.EfficientNetB1, efn.EfficientNetB2, efn.EfficientNetB3, 
-#         efn.EfficientNetB4, efn.EfficientNetB5, efn.EfficientNetB6]
-
 def binary_focal_loss(gamma=2., alpha=.25):
     """
     Binary form of focal loss.
@@ -291,6 +180,8 @@ def binary_focal_loss(gamma=2., alpha=.25):
                -K.sum((1 - alpha) * K.pow(pt_0, gamma) * K.log(1. - pt_0))
 
     return binary_focal_loss_fixed
+
+    
 def build_model(dim=128):
     inp = tf.keras.layers.Input(shape=(dim,dim,3))
     base = efn.EfficientNetB7(input_shape=(dim,dim,3),weights='imagenet',pooling='avg',include_top=False)
