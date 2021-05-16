@@ -15,7 +15,7 @@ files_test  = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/test*.tfrec')))
 
 DEVICE = "TPU" #GPU
 
-bs = 16 #Batch Size
+bs = 32 #Batch Size
 
 CFG = dict(
     #hyper parameters 
@@ -62,7 +62,7 @@ if DEVICE == "TPU":
             tf.tpu.experimental.initialize_tpu_system(tpu)
             strategy = tf.distribute.experimental.TPUStrategy(tpu)
             print("TPU initialized")
-        except _:
+        except:
             print("failed to initialize TPU")
     else:
         DEVICE = "GPU"
