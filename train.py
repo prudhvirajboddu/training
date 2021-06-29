@@ -15,7 +15,7 @@ files_test  = np.sort(np.array(tf.io.gfile.glob(GCS_PATH + '/test*.tfrec')))
 
 DEVICE = "TPU" #GPU
 
-bs = 64 #Batch Size
+bs = 32 #Batch Size
 
 CFG = dict(
     #hyper parameters 
@@ -62,7 +62,7 @@ if DEVICE == "TPU":
             tf.tpu.experimental.initialize_tpu_system(tpu)
             strategy = tf.distribute.experimental.TPUStrategy(tpu)
             print("TPU initialized")
-        except _:
+        except:
             print("failed to initialize TPU")
     else:
         DEVICE = "GPU"
@@ -155,13 +155,6 @@ def transform(image, cfg):
 def read_labeled_tfrecord(example):
     tfrec_format = {
         'image'                        : tf.io.FixedLenFeature([], tf.string),
-        """# 'image_name'                   : tf.io.FixedLenFeature([], tf.string),
-        # 'patient_id'                   : tf.io.FixedLenFeature([], tf.int64),
-        # 'sex'                          : tf.io.FixedLenFeature([], tf.int64),
-        # 'age_approx'                   : tf.io.FixedLenFeature([], tf.int64),
-        # 'anatom_site_general_challenge': tf.io.FixedLenFeature([], tf.int64),
-        # 'diagnosis'                    : tf.io.FixedLenFeature([], tf.int64),
-        Model only for images not metadata"""
         'target'                       : tf.io.FixedLenFeature([], tf.int64)
     }           
     example = tf.io.parse_single_example(example, tfrec_format)

@@ -1,2 +1,8 @@
 #folders
+<<<<<<< HEAD
 train/
+=======
+.vscode
+#files
+*.h5
+>>>>>>> 6f5bcc08f9a858a107afe9f259ef1c591ebb91d0
